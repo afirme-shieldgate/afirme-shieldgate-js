@@ -6,7 +6,7 @@ Payment.PAYMENT_CLIENT_APP_CODE = "";
 Payment.PAYMENT_CLIENT_APP_KEY = "";
 Payment.IS_CHECKOUT = false;
 
-Payment.MERCHANT_ID = 500005;
+Payment.MERCHANT_ID = 500028;
 Payment.KOUNT_ENVIRONMENT = "";
 Payment.KOUN_TEST_ENVIRONMENT = "https://tst.kaptcha.com/";
 Payment.KOUN_PROD_ENVIRONMENT = "https://ssl.kaptcha.com/";
