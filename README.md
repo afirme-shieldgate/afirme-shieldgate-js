@@ -1,11 +1,14 @@
 # Afirme ShieldGate JS
+
+===================
+
 Afirme ShieldGate JS es una biblioteca que permite a los desarrolladores conectar fácilmente con el API de TARJETAS DE CRÉDITO de Afirme ShieldGate.
 
 [Revise el ejemplo funcionando](https://developers.shieldgate.mx/docs/payments/#javascript)
 
 ## Instalación
 
-Primero necesitas incluir jQuery y los archivos `payment_[version].min.js` y `payment_[version].min.css` dentro de tu página web especificando "UTF-8" como charset.
+Primero necesitas incluir jQuery y los archivos `payment_2.0.0.min.js` y `payment_2.0.0.min.css` dentro de tu página web especificando "UTF-8" como charset.
 
 ```html
 <script src="https://code.jquery.com/jquery-1.11.3.min.js" charset="UTF-8"></script>
