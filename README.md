@@ -8,7 +8,7 @@ Afirme ShieldGate JS es una biblioteca que permite a los desarrolladores conecta
 
 ## Instalación
 
-Primero necesitas incluir jQuery y los archivos `payment_2.0.0.min.js` y `payment_2.0.0.min.css` dentro de tu página web especificando "UTF-8" como charset.
+Primero necesitas incluir jQuery y los archivos `payment_stable.min.js` y `payment_stable.min.css` dentro de tu página web especificando "UTF-8" como charset.
 
 ```html
 <script src="https://code.jquery.com/jquery-1.11.3.min.js" charset="UTF-8"></script>
