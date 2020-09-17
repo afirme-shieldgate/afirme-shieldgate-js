@@ -13,8 +13,8 @@ Primero necesitas incluir jQuery y los archivos `payment_stable.min.js` y `payme
 ```html
 <script src="https://code.jquery.com/jquery-1.11.3.min.js" charset="UTF-8"></script>
 
-<link href="https://cdn.shieldgate.mx/ccapi/sdk/payment_2.0.0.min.css" rel="stylesheet" type="text/css" />
-<script src="https://cdn.shieldgate.mx/ccapi/sdk/payment_2.0.0.min.js" charset="UTF-8"></script>
+<link href="https://cdn.shieldgate.mx/ccapi/sdk/payment_stable.min.css" rel="stylesheet" type="text/css" />
+<script src="https://cdn.shieldgate.mx/ccapi/sdk/payment_stable.min.js" charset="UTF-8"></script>
 ```
 
 ## Uso
