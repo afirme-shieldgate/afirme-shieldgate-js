@@ -17,7 +17,7 @@ function PaymentForm(elem) {
   this.nip = '';
   this.USE_OTP = false;
   this.brand_name = '';
-  this.isBloqued = false;
+  this.isBlocked = false;
   this.useLunh = true;
 
   // Validate if its displaying in a mobile device
@@ -26,6 +26,7 @@ function PaymentForm(elem) {
 
   this.captureEmail = this.elem.data("capture-email") ? this.elem.data("capture-email") : false;
   this.captureCellPhone = this.elem.data("capture-cellphone") ? this.elem.data("capture-cellphone") : false;
+  this.defaultCountryCode = this.elem.data("default-country") ? this.elem.data("default-country") : false;
   this.captureName = this.elem.data("capture-name") ? this.elem.data("capture-name") : false;
   this.iconColour = this.elem.data("icon-colour") ? this.elem.data("icon-colour") : false;
   this.EXPIRY_USE_DROPDOWNS = this.elem.data("use-dropdowns") ? this.elem.data("use-dropdowns") : false;
@@ -35,6 +36,7 @@ function PaymentForm(elem) {
   // initialize
   this.cvcLenght = 3;
   this.nipLenght = 4;
+  this.verificationLenght = 6;
   this.initEmailInput();
   this.initCellPhoneInput();
   this.initNameInput();
@@ -61,6 +63,10 @@ function PaymentForm(elem) {
   }
 
   this.refreshCreditCardType();
+  if (this.captureCellPhone) {
+    this.refreshCellPhoneFormat();
+    this.refreshCellphoneCountryCode();
+  }
 }
 
 PaymentForm.KEYS = {
@@ -86,6 +92,7 @@ PaymentForm.KEYS = {
 PaymentForm.prototype.creditCardNumberMask = "XXXX XXXX XXXX XXXX";
 PaymentForm.prototype.cvcMask = "XXX";
 PaymentForm.EXPIRY_MASK = "XX / XX";
+PaymentForm.CELLPHONE_MASK = "XXX XXX XXXX";
 PaymentForm.CREDIT_CARD_NUMBER_PLACEHOLDER = "Número de tarjeta";
 PaymentForm.NAME_PLACEHOLDER = "Nombre del titular";
 PaymentForm.EMAIL_PLACEHOLDER = "E-mail";
@@ -105,6 +112,9 @@ PaymentForm.OTP_EXPLICATION_ADD = "Escogiendo esta opción se va a generar una C
 PaymentForm.OTP_EXPLICATION_CHECKOUT = "Escogiendo esta opción se va a generar una Clave Temporal única, con la " +
   "que validarás tu compra.";
 PaymentForm.INVALID_CARD_TYPE_MESSAGE = "Tipo de tarjeta invalida para está operación.";
+PaymentForm.VERIFICATION_PLACEHOLDER = "Código OTP";
+PaymentForm.VERIFICATION_MESSAGE = "Esta operación requiere verificación";
+PaymentForm.VERIFICATION_MESSAGE_2 = "OTP incorrecto, prueba nuevamente";
 
 PaymentForm.CELLPHONE_SVG = '<svg version="1.1" xmlns="http://www.w3.org/2000/svg" width="24px" height="17px" ' +
   'x="0px" y="0px" viewBox="0 0 27.442 27.442" style="enable-background:new 0 0 27.442 27.442;" ' +
@@ -386,49 +396,140 @@ PaymentForm.applyFormatMask = function (string, mask) {
   return formattedString;
 };
 
+PaymentForm.prototype.showVerification = function (objResponse, successCallback, errorCallback) {
+  this.addCardProcess = {
+    response: objResponse,
+    successAddCardCallback: successCallback,
+    errorAddCardCallback: errorCallback,
+  };
+  this.invalidCardTypeMessage = PaymentForm.VERIFICATION_MESSAGE !== this.invalidCardTypeMessage ? PaymentForm.VERIFICATION_MESSAGE : PaymentForm.VERIFICATION_MESSAGE_2;
+  this.addWarningMessage();
+  this.addVerificationContainer();
+};
+
+PaymentForm.prototype.verifyTransaction = function () {
+  this.blockVerificationContainer();
+  let user_id = this.addCardProcess.response.user.id;
+  let transaction_id = this.addCardProcess.response.card.transaction_reference;
+  let verification_type = 'BY_OTP';  // TODO: Dynamic, according to the message in the answer
+  let value = this.getVerificationValue();
+  let $this = this;
+  Payment.verifyTransaction(user_id, transaction_id, verification_type, value,
+    function (response) {
+      $this.unBlockVerificationContainer();
+      $this.removeVerificationContainer();
+      $this.addCardProcess.response.transaction = $this.addCardProcess.response.transaction ? response.transaction : undefined;
+      if (response.transaction.status === 'pending') {
+        return $this.showVerification($this.addCardProcess.response, $this.addCardProcess.successAddCardCallback, $this.addCardProcess.errorAddCardCallback)
+      } else if (response.transaction.status === 'success') {
+        $this.addCardProcess.response.card.status = 'valid';
+      } else {
+        $this.addCardProcess.response.card.status = 'rejected';
+        $this.addCardProcess.response.card.message = response.transaction.message;
+      }
+      $this.addCardProcess.successAddCardCallback($this.addCardProcess.response);
+    },
+    function (response) {
+      $this.unBlockVerificationContainer();
+      $this.removeVerificationContainer();
+      $this.addCardProcess.errorAddCardCallback($this.addCardProcess.response);
+    });
+};
+
 PaymentForm.prototype.cardTypeFromNumberBin = function (number) {
   let number_bin = number.replace(" ", "").substring(0, 6);
   if (number >= 6 && this.numberBin !== number_bin) {
     this.numberBin = number_bin;
-    Payment.getBinInformation(number_bin, this, this.successCallback, function (error) {
+    Payment.getBinInformation(number_bin, this, this.successBinCallback, function (error) {
     });
   }
 };
 
-PaymentForm.prototype.successCallback = function (objResponse, form) {
+PaymentForm.prototype.setRequiredFields = function (required_fields) {
+  const form = this;
+
+  if (!(required_fields && required_fields.length > 0)) {
+    form.removeFiscalNumber();
+    form.removeNip();
+    return
+  }
+
+  required_fields.forEach(function (required_field) {
+    let field_name = typeof (required_field) === 'object' ? Object.keys(required_field)[0] : required_field;
+
+    // Only should be contemplated the no default fields from SDK form (fiscal_number, tuya_key, fiscal_number_type)
+    switch (field_name) {
+      case 'fiscal_number':
+        form.addFiscalNumber();
+        break;
+      case 'tuya_key':
+        form.addNip();
+        break;
+      case 'fiscal_number_type':
+        break;
+    }
+  }
+  );
+};
+
+PaymentForm.prototype.setNoRequiredFields = function (no_required_fields) {
+  const form = this;
+
+  if (!(no_required_fields && no_required_fields.length > 0)) {
+    form.addExpiryContainer();
+    form.addCvcContainer();
+    return
+  }
+
+  no_required_fields.forEach(function (no_required_field) {
+    let field_name = typeof (no_required_field) === 'object' ? Object.keys(no_required_field)[0] : no_required_field;
+
+    // Only should be contemplated the default fields from SDK form (expiration_date, cvv)
+    switch (field_name) {
+      case 'expiration_date':
+        form.removeExpiryContainer();
+        break;
+      case 'cvv':
+        form.removeCvcContainer();
+        break;
+    }
+  }
+  );
+};
+
+PaymentForm.prototype.successBinCallback = function (objResponse, form) {
   // Set luhn flag
   form.useLunh = objResponse.use_luhn;
 
   // Set card type
   form.cardType = objResponse.card_type.length > 0 ? objResponse.card_type : '';
   form.brand_name = objResponse.brand_name.length > 0 ? objResponse.brand_name : '';
+
   // Set card type icon
   $(".card-type-icon").css("background-image", "url(" + objResponse.url_logo + ")");
 
-  // // Set card mask
+  // Set card mask
   form.creditCardNumberMask = objResponse.card_mask ? objResponse.card_mask : "XXXX XXXX XXXX XXXX";
   form.cardNumberInput.attr("maxlength", form.creditCardNumberMask.length);
 
-  form.setInstallmentsOptions(objResponse.installments_options);
+  // Set cvc lenght and cvc mask
+  form.cvcLenght = objResponse.cvv_length;
+  form.cvcInput.attr("maxlength", form.cvcLenght);
+  form.cvcMask = "X".repeat(form.cvcLenght);
+
+  // Set installment options
+  if (objResponse.installments_options && objResponse.installments_options.length > 0) {
+    form.setInstallmentsOptions(objResponse.installments_options);
+  }
 
   // Set use of otp
   form.USE_OTP = objResponse.otp;
-  // form.USE_OTP = false;
 
-  if (form.cardType === 'sx' || form.cardType === 'vr') {
-    form.removeTuyaChanges();
-    form.addFiscalNumber();
-  }
-  // Tuya requirements
-  else if (form.cardType === 'ex' || form.cardType === 'ak') {
-    form.addTuyaChanges();
-  } else {
-    form.removeTuyaChanges();
-    // Set cvc lenght and cvc mask
-    form.cvcLenght = objResponse.cvv_length;
-    form.cvcInput.attr("maxlength", form.cvcLenght);
-    form.cvcMask = "X".repeat(form.cvcLenght);
-  }
+  // Validate required fields for bin
+  form.setRequiredFields(objResponse.required_fields);
+
+  // Validate not required fields for bin
+  form.setNoRequiredFields(objResponse.no_required_fields);
 
   // Validate if card type is valid.
   if (form.exclusiveTypes) {
@@ -441,7 +542,7 @@ PaymentForm.prototype.successCallback = function (objResponse, form) {
 
     if (!is_valid_type) {
       form.blockForm();
-    } else if (is_valid_type && form.isBloqued) {
+    } else if (is_valid_type && form.isBlocked) {
       form.unBlockForm();
     }
   }
@@ -672,23 +773,6 @@ PaymentForm.handleMaskedNumberInputKey = function (e, mask) {
 };
 
 /**
- *
- *
- * @param e
- * @param cardMask
- */
-PaymentForm.handleCreditCardNumberKey = function (e, cardMask) {
-  PaymentForm.handleMaskedNumberInputKey(e, cardMask);
-};
-
-PaymentForm.handleCreditCardNumberChange = function (e) {
-};
-
-PaymentForm.handleExpiryKey = function (e) {
-  PaymentForm.handleMaskedNumberInputKey(e, PaymentForm.EXPIRY_MASK);
-};
-
-/**
  * Generate a random array to assign to tuya keyboard
  */
 PaymentForm.generateRandoms = function () {
@@ -817,6 +901,18 @@ PaymentForm.prototype.refreshValidationOption = function () {
   }
 };
 
+PaymentForm.prototype.refreshVerificationInputValidation = function () {
+  if (this.isVerificationValueValid()) {
+    this.verificationInput.parent().removeClass("has-error");
+    this.verificationBtn.removeAttr('disabled');
+    return true;
+  } else {
+    this.verificationInput.parent().addClass("has-error");
+    this.verificationBtn.attr('disabled', 'disabled');
+    return false;
+  }
+};
+
 PaymentForm.prototype.addValueToNip = function (value, key) {
   if (this.nipWrapperAdded()) {
     if (this.nipInput.val().length < this.nipLenght) {
@@ -868,7 +964,7 @@ PaymentForm.prototype.isEmailValid = function () {
 
 PaymentForm.prototype.isCellPhoneValid = function () {
   if (this.captureCellPhone)
-    return this.getCellPhone() != null && this.getCellPhone().length >= 5;
+    return this.getCellPhone() != null && this.getCellPhone().length >= 7;
   else
     return true;
 };
@@ -926,6 +1022,19 @@ PaymentForm.prototype.isFiscalNumberValid = function () {
     return this.getFiscalNumber() != null && this.getFiscalNumber().length >= 6;
   else
     return true
+};
+
+/**
+ * Is the given input a valid verification?
+ *
+ * @returns {boolean}
+ */
+PaymentForm.prototype.isVerificationValueValid = function () {
+  if (this.verificationContainerAdded()) {
+    return this.getVerificationValue() != null && this.getVerificationValue().trim().length === this.verificationLenght;
+  } else {
+    return true;
+  }
 };
 
 /**
@@ -1009,6 +1118,16 @@ PaymentForm.prototype.warningMessageAdded = function () {
 };
 
 /**
+ * Validate if exists the verification input in the form
+ *
+ * @returns {boolean}
+ */
+PaymentForm.prototype.verificationContainerAdded = function () {
+  let verification_el = this.elem.find(".verification-container");
+  return verification_el.length >= 1;
+};
+
+/**
  * Get the card object.
  *
  * @returns {object}
@@ -1074,7 +1193,7 @@ PaymentForm.prototype.getEmail = function () {
  * @returns {string}
  */
 PaymentForm.prototype.getCellPhone = function () {
-  return this.cellPhoneInput.val();
+  return `${this.cellphoneCountryCodeInput.val()}-${this.cellPhoneInput.val().replace(/ /g, '')}`;
 };
 
 /**
@@ -1115,18 +1234,8 @@ PaymentForm.prototype.getFiscalNumber = function () {
  */
 PaymentForm.prototype.getValidationOption = function () {
   let val = PaymentForm.AUTH_CVC;
-  if (this.cardType === 'ex' || this.cardType === 'ak') {
-    if (this.USE_OTP) {
-      if (this.otpValidation.is(':checked')) {
-        val = PaymentForm.AUTH_OTP;
-      } else {
-        val = PaymentForm.AUTH_NIP;
-      }
-    } else {
-      val = PaymentForm.AUTH_NIP;
-    }
-  } else {
-    val = PaymentForm.AUTH_CVC;
+  if (this.nipWrapperAdded()) {
+    val = PaymentForm.AUTH_NIP;
   }
   return val;
 };
@@ -1160,6 +1269,19 @@ PaymentForm.prototype.getNip = function () {
   }
 };
 
+/**
+ * Get the CVC number inputted.
+ *
+ * @returns {string}
+ */
+PaymentForm.prototype.getVerificationValue = function () {
+  if (this.verificationContainerAdded()) {
+    return this.verificationInput.val();
+  } else {
+    return '';
+  }
+};
+
 // --- --- --- --- --- --- --- --- --- --- ---
 
 /**
@@ -1168,7 +1290,7 @@ PaymentForm.prototype.getNip = function () {
  * @returns {string}
  */
 PaymentForm.prototype.blockForm = function () {
-  this.isBloqued = true;
+  this.isBlocked = true;
 
   // Setup display
   this.emailInput.val("");
@@ -1216,7 +1338,7 @@ PaymentForm.prototype.blockForm = function () {
  * @returns {string}
  */
 PaymentForm.prototype.unBlockForm = function () {
-  this.isBloqued = false;
+  this.isBlocked = false;
 
   // Setup display
   this.emailInput.removeAttr("disabled");
@@ -1248,7 +1370,7 @@ PaymentForm.prototype.unBlockForm = function () {
  * @param colour
  */
 PaymentForm.prototype.setIconColour = function (colour) {
-  this.elem.find(".icon .svg").css({"fill": colour});
+  this.elem.find(".icon .svg").css({ "fill": colour });
 };
 
 /**
@@ -1283,19 +1405,43 @@ PaymentForm.prototype.refreshExpiryMonthYearInput = function () {
  *
  */
 PaymentForm.prototype.refreshCvc = function () {
-  let numbersOnly = PaymentForm.numbersOnlyString($(this.cvcInput).val());
-  let formattedNumber = PaymentForm.applyFormatMask(numbersOnly, this.creditCardNumberMask);
-  $(this.cvcInput).val(formattedNumber);
+  $(this.cvcInput).val(PaymentForm.numbersOnlyString($(this.cvcInput).val()));
 };
 
 /**
  *
  */
 PaymentForm.prototype.refreshNip = function () {
-  let numbersOnly = PaymentForm.numbersOnlyString($(this.nipInput).val());
-  let formattedNumber = PaymentForm.applyFormatMask(numbersOnly, this.creditCardNumberMask);
-  $(this.nipInput).val(formattedNumber);
+  $(this.nipInput).val(PaymentForm.numbersOnlyString($(this.nipInput).val()));
 };
+
+/**
+ *
+ */
+PaymentForm.prototype.refreshVerificationInput = function () {
+  $(this.verificationInput).val(PaymentForm.numbersOnlyString($(this.verificationInput).val()));
+};
+
+/**
+ *
+ */
+PaymentForm.prototype.refreshCellPhoneFormat = function () {
+  let numbersOnly = PaymentForm.numbersOnlyString($(this.cellPhoneInput).val());
+  let formattedNumber = PaymentForm.applyFormatMask(numbersOnly, PaymentForm.CELLPHONE_MASK);
+  $(this.cellPhoneInput).val(formattedNumber);
+};
+
+/** 
+ * Get country flag image src
+ */
+PaymentForm.prototype.refreshCellphoneCountryCode = function () {
+  let currentCountryCode = this.cellphoneCountryCodeInput.find("option:selected").data("country-code") || null;
+  if (currentCountryCode) {
+    let flag = Payment.getCountryByCountryCode(currentCountryCode).flag;
+    this.cellPhoneCountryCodeFlag.setAttribute('src', flag);
+  }
+};
+
 // --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- ---
 
 PaymentForm.prototype.addFiscalNumber = function () {
@@ -1411,27 +1557,76 @@ PaymentForm.prototype.removeWarningMessage = function () {
     this.elem.find(".warning-message").remove();
   }
 };
-// --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- ---
-/**
- * The next methods are temporary because only exito use otp and nip
- */
-PaymentForm.prototype.addTuyaChanges = function () {
-  this.addFiscalNumber();
-  this.addNip();
-  this.addOtpValidation();
-  this.removeExpiryContainer();
-  this.removeCvcContainer();
+
+PaymentForm.prototype.addVerificationContainer = function () {
+  if (!this.verificationContainerAdded()) {
+    this.cardNumberInput.attr("disabled", "disabled");
+    this.emailInput.attr("disabled", "disabled");
+    this.cellPhoneInput.attr("disabled", "disabled");
+    this.nameInput.attr("disabled", "disabled");
+    this.cvcInput.attr("disabled", "disabled");
+
+    if (this.EXPIRY_USE_DROPDOWNS) {
+      this.expiryMonthInput.attr("disabled", "disabled");
+      this.expiryYearInput.attr("disabled", "disabled");
+    } else {
+      this.expiryMonthYearInput.attr("disabled", "disabled");
+    }
+
+    if (this.fiscalNumberAdded()) {
+      this.fiscalNumberInput.attr("disabled", "disabled")
+    }
+    if (this.nipWrapperAdded()) {
+      this.nipInput.attr("disabled", "disabled")
+    }
+
+    this.initVerificationInput();
+    this.setupVerificationInput();
+    this.setIconColour(this.iconColour);
+  }
 };
 
-PaymentForm.prototype.removeTuyaChanges = function () {
-  this.addExpiryContainer();
-  this.addCvcContainer();
-  this.removeFiscalNumber();
-  this.removeNip();
-  this.removeOtpValidation();
-  this.removeVirtualKeyboard();
-  this.removeValidationMessage();
+PaymentForm.prototype.blockVerificationContainer = function () {
+  if (this.verificationContainerAdded()) {
+    this.verificationInput.attr('disabled', 'disabled');
+    this.verificationBtn.attr('disabled', 'disabled');
+  }
 };
+
+PaymentForm.prototype.unBlockVerificationContainer = function () {
+  if (this.verificationContainerAdded()) {
+    this.cardNumberInput.removeAttr('disabled');
+    this.emailInput.removeAttr('disabled');
+    this.cellPhoneInput.removeAttr('disabled');
+    this.nameInput.removeAttr('disabled');
+    this.cvcInput.removeAttr('disabled');
+
+    if (this.EXPIRY_USE_DROPDOWNS) {
+      this.expiryMonthInput.removeAttr('disabled');
+      this.expiryYearInput.removeAttr('disabled');
+    } else {
+      this.expiryMonthYearInput.removeAttr('disabled');
+    }
+
+    if (this.fiscalNumberAdded()) {
+      this.fiscalNumberInput.removeAttr('disabled');
+    }
+    if (this.nipWrapperAdded()) {
+      this.nipInput.removeAttr('disabled');
+    }
+
+    this.verificationInput.removeAttr('disabled');
+    this.verificationBtn.removeAttr('disabled');
+  }
+};
+
+PaymentForm.prototype.removeVerificationContainer = function () {
+  if (this.verificationContainerAdded()) {
+    this.removeWarningMessage();
+    this.elem.find(".verification-container").remove();
+  }
+};
+
 // --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- ---
 
 /**
@@ -1511,10 +1706,14 @@ PaymentForm.prototype.initCellPhoneInput = function () {
   if (!this.captureCellPhone)
     this.captureCellPhone = this.elem.find(".cellphone")[0] != null;
   // Find or create the cellphone input element
+  this.cellphoneCountryCodeInput = PaymentForm.detachOrCreateElement(this.elem, ".cellphone-country-code", "<select class='cellphone-country-code' />");
   this.cellPhoneInput = PaymentForm.detachOrCreateElement(this.elem, ".cellphone", "<input class='cellphone' />");
   // Ensure the cellphone element has a field cellphone
   if (!PaymentForm.elementHasAttribute(this.cellPhoneInput, "name")) {
     this.cellPhoneInput.attr("name", "cellphone");
+  }
+  if (!PaymentForm.elementHasAttribute(this.cellphoneCountryCodeInput, "name")) {
+    this.cellphoneCountryCodeInput.attr("name", "cellphone-country-code");
   }
   // Ensure the cellphone element has a placeholder
   if (!PaymentForm.elementHasAttribute(this.cellPhoneInput, "placeholder")) {
@@ -1524,6 +1723,25 @@ PaymentForm.prototype.initCellPhoneInput = function () {
   this.cellPhoneInput.attr("autocorrect", "off");
   this.cellPhoneInput.attr("spellcheck", "off");
   this.cellPhoneInput.attr("autocapitalize", "off");
+
+  let $this = this;
+
+  const options = Payment.COUNTRIES.filter(country => country.active);
+
+  setTimeout(() => {
+    this.cellphoneSelectize = $this.cellphoneCountryCodeInput.selectize(
+      {
+        valueField: 'country_code',
+        labelField: 'name',
+        searchField: 'name',
+        options: options,
+      }
+    );
+    this.cellphoneSelectizeControl = this.cellphoneSelectize[0].selectize;
+    const defaultCountry = this.defaultCountryCode ? this.defaultCountryCode : Payment.guessCountry();
+    this.cellphoneSelectizeControl.setValue(defaultCountry)
+  }, 0);
+
 };
 
 /**
@@ -1629,6 +1847,34 @@ PaymentForm.prototype.initOtpValidation = function () {
   this.otpValidation = PaymentForm.detachOrCreateElement(this.elem, ".messages", "<div class='.messages' />");
 };
 
+/**
+ * Initialise the verification input and button
+ */
+PaymentForm.prototype.initVerificationInput = function () {
+  // Find or create the verification input element
+  this.verificationInput = PaymentForm.detachOrCreateElement(this.elem, ".verification", "<input class='verification' />");
+  // Ensure the verification has a placeholder
+  if (!PaymentForm.elementHasAttribute(this.verificationInput, "placeholder")) {
+    this.verificationInput.attr("placeholder", PaymentForm.VERIFICATION_PLACEHOLDER);
+  }
+  this.verificationInput.attr("type", "text");
+  this.verificationInput.attr("maxlength", this.verificationLenght);
+  this.verificationInput.attr("x-autocompletetype", "cc-csc");
+  this.verificationInput.attr("autocompletetype", "cc-csc");
+  this.verificationInput.attr("autocorrect", "off");
+  this.verificationInput.attr("spellcheck", "off");
+  this.verificationInput.attr("autocapitalize", "off");
+  // if (!this.IS_MOBILE) {
+  //   this.verificationInput.attr("type", "password");
+  // }
+
+  // Find or create the verification button element
+  this.verificationBtn = PaymentForm.detachOrCreateElement(this.elem, ".verification-btn", "<input class='verification-btn' />");
+  this.verificationBtn.attr("type", "button");
+  this.verificationBtn.attr("disabled", "disabled");
+  this.verificationBtn.attr("value", "Validar");
+};
+
 // --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- ---
 
 PaymentForm.prototype.setupCardNumberInput = function () {
@@ -1642,12 +1888,11 @@ PaymentForm.prototype.setupCardNumberInput = function () {
   // Events
   let $this = this;
   this.cardNumberInput.keydown(function (e) {
-    PaymentForm.handleCreditCardNumberKey(e, $this.creditCardNumberMask);
+    PaymentForm.handleMaskedNumberInputKey(e, $this.creditCardNumberMask);
   });
   this.cardNumberInput.keyup(function () {
     $this.refreshCreditCardType();
   });
-  //this.cardNumberInput.change(PaymentForm.handleCreditCardNumberChange);
   this.cardNumberInput.on('paste', function () {
     setTimeout(function () {
       $this.refreshCreditCardNumberFormat();
@@ -1677,7 +1922,7 @@ PaymentForm.prototype.setupNameInput = function () {
 
 PaymentForm.prototype.setupEmailInput = function () {
   if (this.captureEmail) {
-    this.elem.append("<div class='email-container'><div class='email-wrapper'></div></div>");
+    this.elem.append("<div class='email-wrapper'></div>");
     let wrapper = this.elem.find(".email-wrapper");
     wrapper.append(this.emailInput);
     wrapper.append("<div class='icon'></div>");
@@ -1695,14 +1940,25 @@ PaymentForm.prototype.setupCellPhoneInput = function () {
   if (this.captureCellPhone) {
     this.elem.append("<div class='cellphone-container'><div class='cellphone-wrapper'></div></div>");
     let wrapper = this.elem.find(".cellphone-wrapper");
+    wrapper.append(this.cellphoneCountryCodeInput);
     wrapper.append(this.cellPhoneInput);
-    wrapper.append("<div class='icon'></div>");
-    wrapper.find(".icon").append(PaymentForm.CELLPHONE_SVG);
+    wrapper.append("<div class='icon'><img class='flag'/></div>");
+    this.cellPhoneCountryCodeFlag = wrapper.find(".flag")[0];
+
+    wrapper.append("<div class='icon icon-phone'></div>");
+    wrapper.find(".icon-phone").append(PaymentForm.CELLPHONE_SVG);
 
     // Events
     let $this = this;
+    this.cellPhoneInput.keydown(function (e) {
+      PaymentForm.handleMaskedNumberInputKey(e, PaymentForm.CELLPHONE_MASK);
+    });
     this.cellPhoneInput.blur(function () {
+      $this.refreshCellPhoneFormat();
       $this.refreshCellPhoneValidation();
+    });
+    this.cellphoneCountryCodeInput.change(function () {
+      $this.refreshCellphoneCountryCode();
     });
   }
 };
@@ -1783,7 +2039,7 @@ PaymentForm.prototype.setupExpiryInput = function () {
     // Events
     let $this = this;
     this.expiryMonthYearInput.keydown(function (e) {
-      PaymentForm.handleExpiryKey(e);
+      PaymentForm.handleMaskedNumberInputKey(e, PaymentForm.EXPIRY_MASK);
       let val = $this.expiryMonthYearInput.val();
 
       if (val.length === 1 && parseInt(val) > 1 && PaymentForm.keyIsNumber(e)) {
@@ -1968,6 +2224,36 @@ PaymentForm.prototype.setupWarningMessage = function () {
   }
   this.warningMessage = wrapper;
   this.elem.append(wrapper);
+};
+
+PaymentForm.prototype.setupVerificationInput = function () {
+  this.elem.append("<div class='verification-container'><div class='verification-wrapper'></div><div class='verification-btn-wrapper'></div></div>");
+
+  let container = this.elem.find(".verification-btn-wrapper");
+  container.append(this.verificationBtn);
+
+  let wrapper = this.elem.find(".verification-wrapper");
+  wrapper.append(this.verificationInput);
+  wrapper.append("<div class='icon'></div>");
+  wrapper.find(".icon").append(PaymentForm.LOCK_SVG);
+
+  // Events
+  let $this = this;
+  this.verificationInput.keydown(PaymentForm.filterNumberOnlyKey);
+  this.verificationInput.blur(function () {
+    $this.refreshVerificationInputValidation();
+  });
+  this.verificationInput.on('keyup', function () {
+    $this.refreshVerificationInputValidation();
+  });
+  this.verificationInput.on('paste', function () {
+    setTimeout(function () {
+      $this.refreshVerificationInput();
+    }, 1);
+  });
+  this.verificationBtn.on('click', function () {
+    $this.verifyTransaction();
+  });
 };
 
 PaymentForm.prototype.expiryMonth = function () {

@@ -4,9 +4,9 @@
     "Developer Team <dev@shieldgate.mx>"
   ],
   "description": "Credit Card input form with validation and allows you to create a token with credit/debit card details in your web apps, by preventing sensitive card data from crossing your server (More information, read PCI compliance).",
-  "version": "2.0.0",
-  "main": "./payment_2.0.0.min.js",
-  "homepage": "https://www.rbmcolombia.com",
+  "version": "2.4.4",
+  "main": "./payment_stable.min.js",
+  "homepage": "https://shieldgate.mx",
   "moduleType": [
     "globals"
   ],

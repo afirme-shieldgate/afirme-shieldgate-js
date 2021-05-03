@@ -26,8 +26,14 @@
     fiscalNumber: function () {
       return this.data("paymentform").getFiscalNumber();
     },
+    cellPhone: function () {
+      return this.data("paymentform").getCellPhone();
+    },
     validationOption: function () {
       return this.data("paymentform").getValidationOption();
+    },
+    showVerification: function (objResponse, successCallback, errorCallback) {
+      return this.data("paymentform").showVerification(objResponse, successCallback, errorCallback);
     }
   };
 
